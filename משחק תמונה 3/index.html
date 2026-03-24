@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Park Seek and Find</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        #game-container {
+            position: relative;
+            display: inline-block;
+            max-width: 100%;
+            line-height: 0;
+            user-select: none;
+        }
+        #game-image {
+            max-width: 100%;
+            height: auto;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px -5px rgba(0,0,0,0.2);
+            -webkit-user-drag: none;
+        }
+        .target-area {
+            position: absolute;
+            cursor: pointer;
+            border-radius: 12px;
+            z-index: 50;
+            /* background: rgba(255, 0, 0, 0.2); // להסרת הערה זו כדי לראות את אזורי הלחיצה */
+            transform: translate(-50%, -50%);
+            -webkit-tap-highlight-color: transparent;
+        }
+        .found-marker {
+            position: absolute;
+            pointer-events: none;
+            width: 34px;
+            height: 34px;
+            background-color: #22c55e;
+            border: 2px solid white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 20px;
+            font-weight: bold;
+            z-index: 60;
+            transform: translate(-50%, -50%);
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            animation: pop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        @keyframes pop {
+            0% { transform: translate(-50%, -50%) scale(0); }
+            100% { transform: translate(-50%, -50%) scale(1); }
+        }
+        .item-card {
+            transition: all 0.2s;
+            cursor: pointer;
+            border-width: 2px;
+        }
+        .item-card.active {
+            border-color: #3b82f6;
+            background-color: #eff6ff;
+            transform: scale(1.03);
+            box-shadow: 0 4px 10px rgba(59, 130, 246, 0.2);
+        }
+        .item-card.found {
+            opacity: 0.4;
+            text-decoration: line-through;
+            pointer-events: none;
+            background-color: #f0fdf4;
+            border-color: #86efac;
+        }
+        #overlay-start {
+            position: absolute;
+            inset: 0;
+            background: rgba(255,255,255,0.9);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+            border-radius: 12px;
+            backdrop-filter: blur(5px);
+        }
+    </style>
+</head>
+<body class="bg-slate-100 min-h-screen p-4 md:p-8 font-sans">
+
+    <div class="max-w-5xl mx-auto">
+        <header class="text-center mb-6">
+            <h1 class="text-3xl font-black text-slate-800 tracking-tight">Park Adventure</h1>
+            <p class="text-slate-600 font-medium">Click a word, then find it in the picture!</p>
+            <p dir="rtl" class="text-slate-500 text-sm mt-1">לחצו על מילה באנגלית, הקשיבו לה, ומצאו אותה בתמונה.</p>
+        </header>
+
+        <div class="flex flex-col items-center gap-6">
+            <div id="game-container">
+                <div id="overlay-start">
+                    <button onclick="startGame()" class="bg-blue-600 hover:bg-blue-700 text-white px-12 py-5 rounded-full text-2xl font-bold shadow-2xl transition-all active:scale-95">
+                        Start Game / התחל
+                    </button>
+                </div>
+                
+                <img src="park.jpg" alt="Park Scene" id="game-image" onerror="this.src='https://api.clippier.com/v1/files/uploaded:park.jpg-a840d4db-8e45-4761-b08c-b02ebd2edad2'">
+                <div id="targets-layer"></div>
+                <div id="markers-layer"></div>
+            </div>
+
+            <div class="w-full grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3" id="word-list">
+                <!-- Dynamically populated -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // קואורדינטות מעודכנות באחוזים לפי התמונה המסומנת
+        const gameItems = [
+            { id: 'door', en: 'grey door', x: 23, y: 12, w: 8, h: 18 },
+            { id: 'balloon', en: 'balloon', x: 22.5, y: 27, w: 5, h: 8 },
+            { id: 'cat', en: 'black cat', x: 65, y: 13.5, w: 5, h: 5 },
+            { id: 'ambulance', en: 'ambulance', x: 91, y: 21, w: 15, h: 15 },
+            { id: 'book', en: 'red book', x: 53, y: 40, w: 4, h: 5 },
+            { id: 'bottle', en: 'bottle', x: 57.5, y: 53, w: 3, h: 7 },
+            { id: 'zebra', en: 'zebra', x: 77.5, y: 49, w: 14, h: 14 },
+            { id: 'apple', en: 'green apple', x: 28, y: 67, w: 5, h: 5 },
+            { id: 'avocado', en: 'avocado', x: 23.5, y: 75, w: 5, h: 6 },
+            { id: 'kangaroo', en: 'kangaroo', x: 58.5, y: 73, w: 12, h: 15 },
+            { id: 'duck', en: 'duck', x: 60, y: 89, w: 6, h: 6 },
+            { id: 'bag', en: 'big bag', x: 87.5, y: 88, w: 8, h: 12 }
+        ];
+
+        let activeItemId = null;
+        let foundItems = new Set();
+        const synth = window.speechSynthesis;
+
+        function startGame() {
+            document.getElementById('overlay-start').style.display = 'none';
+            // Pre-warm the speech engine
+            speak("Ready? Find the objects!");
+            setupTargets();
+        }
+
+        function speak(text) {
+            // Cancel any current speech
+            synth.cancel();
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = 'en-US';
+            utterance.rate = 0.9;
+            utterance.pitch = 1.1;
+            synth.speak(utterance);
+        }
+
+        function setupTargets() {
+            const targetsLayer = document.getElementById('targets-layer');
+            targetsLayer.innerHTML = '';
+            
+            gameItems.forEach(item => {
+                if (foundItems.has(item.id)) return;
+                
+                const target = document.createElement('div');
+                target.className = 'target-area';
+                
+                target.style.left = item.x + '%';
+                target.style.top = item.y + '%';
+                target.style.width = item.w + '%';
+                target.style.height = item.h + '%';
+
+                target.onclick = (e) => {
+                    e.preventDefault();
+                    if (activeItemId === item.id) {
+                        markAsFound(item.id, item.x, item.y);
+                    }
+                };
+                targetsLayer.appendChild(target);
+            });
+        }
+
+        function init() {
+            const wordList = document.getElementById('word-list');
+            gameItems.forEach(item => {
+                const card = document.createElement('div');
+                card.className = 'item-card bg-white border-slate-200 rounded-xl p-4 text-center font-bold text-slate-700 shadow-sm';
+                card.id = `card-${item.id}`;
+                card.innerText = item.en.toUpperCase();
+                card.onclick = () => {
+                    if (foundItems.has(item.id)) return;
+                    if (activeItemId) document.getElementById(`card-${activeItemId}`).classList.remove('active');
+                    activeItemId = item.id;
+                    card.classList.add('active');
+                    speak(item.en);
+                };
+                wordList.appendChild(card);
+            });
+
+            const gameImage = document.getElementById('game-image');
+            gameImage.onload = setupTargets;
+            window.addEventListener('resize', setupTargets);
+            if (gameImage.complete) setupTargets();
+        }
+
+        function markAsFound(id, x, y) {
+            foundItems.add(id);
+            const item = gameItems.find(i => i.id === id);
+            
+            const card = document.getElementById(`card-${id}`);
+            card.classList.remove('active');
+            card.classList.add('found');
+            
+            const marker = document.createElement('div');
+            marker.className = 'found-marker';
+            marker.innerHTML = '✓';
+            marker.style.left = x + '%';
+            marker.style.top = y + '%';
+            document.getElementById('markers-layer').appendChild(marker);
+
+            speak("Great job! You found the " + item.en);
+            activeItemId = null;
+            setupTargets();
+
+            if (foundItems.size === gameItems.length) {
+                setTimeout(() => {
+                    speak("Congratulations! You found everything!");
+                    alert("Well Done! You found all the objects! / כל הכבוד! מצאתם את כל האובייקטים!");
+                }, 600);
+            }
+        }
+
+        init();
+    </script>
+</body>
+</html>
